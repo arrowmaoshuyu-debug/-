@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Minecraft 躲猫猫 · 稳定联机版</title>
+    <style>
+        :root {
+            --bg: #1a1a1a;
+            --panel-bg: rgba(30,30,30,0.95);
+            --text: #e0d8c8;
+            --gold: #c8a84a;
+            --red: #c0392b;
+            --green: #5a9e4b;
+            --button: #5a4a3a;
+            --button-hover: #7a6a5a;
+            --border: #4a3a2a;
+            --input-bg: #2a2218;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Courier New','SimHei',monospace; background:#000; overflow:hidden; user-select:none; }
+        #game-canvas { display:block; position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:1; }
+        #ui-overlay { position:fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; }
+        #ui-overlay > * { pointer-events:auto; }
+        #room-panel {
+            position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+            background:var(--panel-bg); border:3px solid var(--border); border-radius:12px;
+            padding:25px 30px; text-align:center; color:var(--text);
+            box-shadow:0 20px 60px rgba(0,0,0,0.7); min-width:360px;
+            backdrop-filter:blur(10px); max-width:95vw;
+        }
+        #room-panel h1 { font-size:1.8em; margin-bottom:6px; color:var(--gold); }
+        #room-panel .subtitle { font-size:0.8em; color:#aaa; margin-bottom:15px; }
+        #room-panel input {
+            width:100%; padding:12px; font-size:1.3em; text-align:center;
+            letter-spacing:5px; background:var(--input-bg); border:2px solid var(--border);
+            border-radius:8px; color:var(--gold); font-family:'Courier New',monospace;
+            outline:none; margin:8px 0;
+        }
+        #room-panel button {
+            margin:6px 5px; padding:12px 24px; font-size:1em; cursor:pointer;
+            background:var(--button); color:var(--text); border:2px solid var(--border);
+            border-radius:8px; letter-spacing:1px; font-weight:bold; transition:0.2s;
+        }
+        #room-panel button.primary { background:#5a7a3a; border-color:#6a9a4a; color:#fff; }
+        #room-panel button:hover { border-color:var(--gold); background:#6a5a4a; }
+        #room-panel button.primary:hover { background:#6a9a4a; }
+        #hud {
+            position:absolute; top:15px; left:50%; transform:translateX(-50%);
+            display:flex; gap:15px; align-items:center; background:var(--panel-bg);
+            padding:8px 20px; border-radius:30px; border:2px solid var(--border);
+            color:var(--text); font-size:0.9em; backdrop-filter:blur(8px);
+        }
+        .timer { color:var(--gold); font-weight:bold; font-size:1.2em; }
+        .role-badge { padding:4px 12px; border-radius:14px; font-weight:bold; }
+        .role-seeker { background:#c0392b; color:#fff; }
+        .role-hider { background:#5a9e4b; color:#fff; }
+        #inventory-panel {
+            position:absolute; bottom:80px; left:50%; transform:translateX(-50%);
+            background:var(--panel-bg); border:3px solid var(--border); border-radius:12px;
+            padding:14px; display:none; flex-wrap:wrap; gap:8px; justify-content:center;
+            backdrop-filter:blur(10px);
+        }
+        .inv-slot {
+            width:55px; height:55px; background:#2a2218; border:2px solid #5a4a3a;
+            border-radius:8px; cursor:pointer; display:flex; align-items:center;
+            justify-content:center; flex-direction:column; color:#aaa; font-size:0.65em;
+        }
+        .inv-slot.selected { border-color:#ffcc00; background:#4a3a20; }
+        #message-toast {
+            position:absolute; top:50%; left:50%; transform:translate(-50%,-50%) scale(0);
+            background:var(--panel-bg); border:2px solid var(--gold); border-radius:16px;
+            padding:16px 30px; color:var(--gold); font-size:1.2em; font-weight:bold;
+            transition:transform 0.3s; pointer-events:none; backdrop-filter:blur(10px);
+        }
+        #message-toast.show { transform:translate(-50%,-50%) scale(1); }
+        #player-list {
+            position:absolute; top:110px; right:15px; background:var(--panel-bg);
+            border:2px solid var(--border); border-radius:10px; padding:10px 14px;
+            color:var(--text); font-size:0.75em; backdrop-filter:blur(8px);
+        }
+        #error-banner {
+            position:fixed; top:0; left:0; width:100%; background:#c0392b; color:#fff;
+            text-align:center; padding:8px; font-weight:bold; z-index:999; display:none;
+        }
+    </style>
+</head>
+<body>
+    <div id="error-banner">⚠️ 资源加载失败，请刷新或检查网络</div>
+    <canvas id="game-canvas"></canvas>
+    <div id="ui-overlay">
+        <div id="room-panel">
+            <h1>🏠 躲猫猫</h1>
+            <div class="subtitle">跨设备联机 | 扫描下方二维码加入</div>
+            <label>房间号码</label>
+            <input type="text" id="room-input" maxlength="5" placeholder="输入5位数字" autocomplete="off">
+            <br>
+            <button class="primary" id="btn-create">🎲 创建房间</button>
+            <button id="btn-join">🚪 加入房间</button>
+            <div id="share-link" style="margin-top:12px; font-size:0.8em; color:#aaa;"></div>
+            <div style="margin-top:8px; font-size:0.7em; color:#777;">
+                房主创建后，将本页面链接发给其他玩家<br>或让对方扫码（用微信/相机）
+            </div>
+        </div>
+        <div id="hud" style="display:none;">
+            <span id="hud-round">回合 1/3</span>
+            <span class="timer" id="hud-timer">30</span>
+            <span id="hud-role" class="role-badge">等待中...</span>
+            <span id="hud-score">比分 0:0</span>
+        </div>
+        <div id="inventory-panel"></div>
+        <div id="message-toast"></div>
+        <div id="player-list" style="display:none;">
+            <h4>👥 玩家</h4>
+            <div id="player-list-inner"></div>
+        </div>
+    </div>
+
+    <!-- 使用国内可用的 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <!-- 移除 qrcodejs，改为手动生成链接 -->
+
+    <script>
+        // 检查关键库是否加载成功
+        window.addEventListener('load', function() {
+            if (typeof THREE === 'undefined' || typeof Peer === 'undefined') {
+                document.getElementById('error-banner').style.display = 'block';
+                document.getElementById('error-banner').textContent = '⚠️ 网络加载失败，请使用科学上网或更换网络后刷新';
+            }
+        });
+
+        // ==================== 游戏代码（同前，但作了稳定性调整） ====================
+        const PREPARATION_TIME = 30;
+        const GAME_TIME = 180;
+        const TOTAL_ROUNDS = 3;
+        const WORLD_SIZE = 60;
+        const PLAYER_SPEED = 6;
+        const HIDER_SPEED = 3.5;
+        const ATTACK_COOLDOWN = 0.8;
+        const WEAPON_RANGES = { 'stone_sword':3.5, 'iron_sword':4.5, 'golden_sword':4.0 };
+
+        const canvas = document.getElementById('game-canvas');
+        const roomPanel = document.getElementById('room-panel');
+        const roomInput = document.getElementById('room-input');
+        const btnCreate = document.getElementById('btn-create');
+        const btnJoin = document.getElementById('btn-join');
+        const hudEl = document.getElementById('hud');
+        const hudTimer = document.getElementById('hud-timer');
+        const hudRound = document.getElementById('hud-round');
+        const hudRole = document.getElementById('hud-role');
+        const hudScore = document.getElementById('hud-score');
+        const inventoryPanel = document.getElementById('inventory-panel');
+        const messageToast = document.getElementById('message-toast');
+        const playerListEl = document.getElementById('player-list');
+        const playerListInner = document.getElementById('player-list-inner');
+        const shareLinkDiv = document.getElementById('share-link');
+
+        // 渲染器
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias:true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.1;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color('#87CEEB');
+        scene.fog = new THREE.Fog('#c8d8f0',40,100);
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.5, 120);
+        camera.position.set(20,18,25);
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.set(0,2,0);
+        controls.enableDamping = true;
+        controls.minDistance = 3;
+        controls.maxDistance = 50;
+        controls.update();
+
+        scene.add(new THREE.AmbientLight('#bcd4f0',1.4));
+        const sun = new THREE.DirectionalLight('#fff8e8',4.5);
+        sun.position.set(40,50,20);
+        sun.castShadow = true;
+        sun.shadow.mapSize.width=2048; sun.shadow.mapSize.height=2048;
+        sun.shadow.camera.near=0.5; sun.shadow.camera.far=150;
+        sun.shadow.camera.left=-50; sun.shadow.camera.right=50;
+        sun.shadow.camera.top=50; sun.shadow.camera.bottom=-50;
+        scene.add(sun);
+        scene.add(new THREE.HemisphereLight('#87CEEB','#6b8a3a',0.9));
+
+        function mMat(col,r=0.85,m=0){ return new THREE.MeshStandardMaterial({color:new THREE.Color(col),roughness:r,metalness:m}); }
+        const grassMat=mMat('#7CBD4B'); const dirtPath=mMat('#B8A878'); const cobble=mMat('#7F7F7F');
+        const oakLog=mMat('#9D7A4D'); const oakPlank=mMat('#C8A87C'); const leaves=mMat('#4C8F3B');
+        const waterMat=new THREE.MeshStandardMaterial({color:'#3F76E4',roughness:0.3,transparent:true,opacity:0.75});
+        const lavaMat=new THREE.MeshStandardMaterial({color:'#FF6A00',roughness:0.2,emissive:'#FF3D00',emissiveIntensity:2.5});
+        const anvil=mMat('#4F4F4F',0.7,0.6); const hay=mMat('#C8C443'); const stoneBrick=mMat('#A0A0A0');
+        const fence=mMat('#B8956A'); const roof=mMat('#8B3A3A');
+
+        function box(w,h,d,mat){ const g=new THREE.BoxGeometry(w,h,d); const m=new THREE.Mesh(g,mat); m.castShadow=true; m.receiveShadow=true; return m; }
+
+        // 村庄构建（精简但完整）
+        function buildVillage(){
+            const v=new THREE.Group();
+            v.add(box(WORLD_SIZE,0.3,WORLD_SIZE,grassMat).translateY(-0.15));
+            [[0,0,3,22],[-8,6,16,2.5],[8,-4,2.5,14],[-4,-6,20,2.5]].forEach(p=>{
+                const path=box(p[2],0.05,p[3],dirtPath); path.position.set(p[0],0.16,p[1]); v.add(path);
+            });
+            // 水井
+            const well=new THREE.Group();
+            well.add(box(3.5,2,3.5,mMat('#C8C0B8')).translateY(1));
+            well.add(box(2,0.1,2,waterMat).translateY(1.85));
+            well.position.set(0,0,0); v.add(well);
+            // 几栋房子
+            function house(x,z,ry=0){
+                const h=new THREE.Group();
+                h.add(box(7,0.5,7,cobble).translateY(0.25));
+                const wh=4;
+                h.add(box(2.5,wh,0.4,oakPlank).translate(-1.8,wh/2+0.5,3.3));
+                h.add(box(2.5,wh,0.4,oakPlank).translate(1.8,wh/2+0.5,3.3));
+                h.add(box(7,wh,0.4,oakPlank).translate(0,wh/2+0.5,-3.3));
+                h.add(box(0.4,wh,6.6,oakPlank).translate(-3.3,wh/2+0.5,0));
+                h.add(box(0.4,wh,6.6,oakPlank).translate(3.3,wh/2+0.5,0));
+                const r=new THREE.Group();
+                for(let i=0;i<5;i++) r.add(box(7.5-i*1.1,0.5,7.5-i*1.1,roof).translate(0,wh+0.5+i*0.45,0));
+                r.add(box(1.5,0.6,7.5,roof).translate(0,wh+0.5+5*0.45,0));
+                h.add(r);
+                h.position.set(x,0,z); h.rotation.y=ry; return h;
+            }
+            v.add(house(-9,7,0.2)); v.add(house(9,-6,-0.2)); v.add(house(-8,-7,0.3));
+            // 铁匠铺
+            const bs=new THREE.Group();
+            bs.add(box(6,0.6,6,stoneBrick).translateY(0.3));
+            bs.add(box(2,0.15,2,lavaMat).translate(1.5,0.65,-1));
+            bs.add(box(1.4,0.6,1,anvil).translate(-1.5,1,0));
+            bs.position.set(10,0,5); v.add(bs);
+            // 农田
+            const farm=new THREE.Group();
+            farm.add(box(5,0.4,8,mMat('#6B4226')).translateY(0.2));
+            farm.add(box(0.8,0.2,7.5,waterMat).translateY(0.35));
+            for(let i=-3;i<=3;i++) farm.add(box(0.35,0.4,0.35,Math.random()>0.5?mMat('#6AA84F'):mMat('#C8B83A')).translate(1.2,0.4,i*0.9));
+            farm.add(box(1.2,1.2,1.2,hay).translate(2.8,0.8,-2.5));
+            farm.position.set(-7,0,9); v.add(farm);
+            // 树
+            for(const [x,z] of [[-14,3],[14,-3],[-12,-10],[13,9],[3,14]]){
+                const t=new THREE.Group(); const hh=4+Math.random()*2;
+                t.add(box(0.7,hh,0.7,oakLog).translateY(hh/2));
+                for(let l=0;l<3;l++) t.add(box(3.5-l*0.7,1.2,3.5-l*0.7,leaves).translateY(hh-0.5+l*0.9));
+                t.position.set(x,0,z); v.add(t);
+            }
+            return v;
+        }
+        scene.add(buildVillage());
+
+        // 游戏状态
+        const GS = {
+            phase:'lobby', roomCode:null, isHost:false, playerId:'', playerName:'', role:null,
+            myPos:new THREE.Vector3(0,2,8), myVel:new THREE.Vector3(),
+            isDisguised:false, disguiseBlock:null, weapon:null, eliminated:false,
+            attackCD:0, round:1, seekerW:0, hiderW:0, prepTimer:PREPARATION_TIME, gameTimer:GAME_TIME,
+            allPlayers:{}, keys:{}, inventoryOpen:false, selectedSlot:null,
+            peer:null, conns:[], hostConn:null
+        };
+
+        const myGroup = new THREE.Group(); scene.add(myGroup);
+        function updateMyModel(){
+            myGroup.clear();
+            if(GS.eliminated){ myGroup.visible=false; return; }
+            myGroup.visible=true;
+            if(GS.isDisguised && GS.disguiseBlock){
+                const b=box(1,1,1, GS.disguiseBlock==='oak_log'?oakLog:oakPlank);
+                myGroup.add(b);
+            } else {
+                const body=new THREE.Group();
+                body.add(box(0.7,1.2,0.5,mMat('#8B6914')).translateY(0.85));
+                body.add(box(0.6,0.6,0.6,mMat('#D4A574')).translateY(1.75));
+                myGroup.add(body);
+            }
+        }
+
+        // 网络
+        function initPeer(){
+            const code = GS.roomCode;
+            const peerId = GS.isHost ? code : code+'-'+Math.random().toString(36).substr(2,6);
+            const peer = new Peer(peerId, {
+                host: '0.peerjs.com', port: 443, secure: true,
+                // 备用: host: 'peerjs-server.herokuapp.com', port: 443, secure: true
+            });
+            GS.peer = peer;
+            peer.on('open', id=>{
+                console.log('Peer opened:', id);
+                if(GS.isHost){
+                    peer.on('connection', conn=>{
+                        GS.conns.push(conn);
+                        conn.on('data', data=>handleMsg(data, conn.peer));
+                        conn.send({type:'join_accept', allPlayers:GS.allPlayers});
+                    });
+                } else {
+                    const conn = peer.connect(code, {reliable:true});
+                    GS.hostConn = conn;
+                    conn.on('open', ()=> conn.send({type:'join_request', name:GS.playerName}));
+                    conn.on('data', data=>handleMsg(data));
+                }
+            });
+            peer.on('error', err=>{ showToast('连接错误，请刷新重试'); console.error(err); });
+        }
+
+        function handleMsg(msg, peerId){
+            if(msg.sender===GS.playerId) return;
+            switch(msg.type){
+                case 'join_request':
+                    if(GS.isHost && GS.phase==='lobby'){
+                        const id='p_'+Math.random().toString(36).substr(2,8);
+                        GS.allPlayers[id]={name:msg.name||'玩家',role:null,pos:{x:0,y:2,z:8},disguised:false,block:null,weapon:null,elim:false};
+                        broadcast({type:'player_list', players:GS.allPlayers});
+                    }
+                    break;
+                case 'join_accept': GS.allPlayers=msg.allPlayers||{}; updatePlayerList(); break;
+                case 'player_list': GS.allPlayers=msg.players; updatePlayerList(); break;
+                case 'game_start':
+                    GS.phase='preparation'; GS.prepTimer=PREPARATION_TIME;
+                    GS.role=msg.roles[GS.playerId]||'hider';
+                    GS.allPlayers=msg.allPlayers; GS.round=msg.round;
+                    closeRoom(); updateRole(); showToast('游戏开始！你是'+(GS.role==='seeker'?'抓捕者':'伪装者'));
+                    break;
+                case 'pos_update':
+                    if(GS.allPlayers[msg.id]){
+                        GS.allPlayers[msg.id].pos=msg.pos;
+                        GS.allPlayers[msg.id].disguised=msg.disguised;
+                        GS.allPlayers[msg.id].block=msg.block;
+                        GS.allPlayers[msg.id].weapon=msg.weapon;
+                        GS.allPlayers[msg.id].elim=msg.elim;
+                    }
+                    break;
+                case 'eliminated':
+                    if(GS.allPlayers[msg.target]) GS.allPlayers[msg.target].elim=true;
+                    if(msg.target===GS.playerId){ GS.eliminated=true; showToast('你被抓住了！'); }
+                    break;
+                case 'round_end':
+                    GS.seekerW=msg.seekerW; GS.hiderW=msg.hiderW;
+                    showToast(msg.winner==='seeker'?'抓捕者获胜！':'伪装者获胜！');
+                    break;
+                case 'game_over': showToast('游戏结束！'); setTimeout(()=>resetLobby(),5000); break;
+            }
+        }
+
+        function broadcast(msg){ if(GS.isHost) GS.conns.forEach(c=>c.send(msg)); }
+        function sendHost(msg){ if(GS.hostConn) GS.hostConn.send(msg); }
+        function broadcastPos(){
+            const m={type:'pos_update', id:GS.playerId, pos:{x:GS.myPos.x,y:GS.myPos.y,z:GS.myPos.z},
+                disguised:GS.isDisguised, block:GS.disguiseBlock, weapon:GS.weapon, elim:GS.eliminated, sender:GS.playerId};
+            GS.isHost?broadcast(m):sendHost(m);
+        }
+
+        function showToast(msg,d=2000){
+            messageToast.textContent=msg; messageToast.classList.add('show');
+            clearTimeout(messageToast._t); messageToast._t=setTimeout(()=>messageToast.classList.remove('show'),d);
+        }
+        function closeRoom(){ roomPanel.style.display='none'; hudEl.style.display='flex'; playerListEl.style.display='block'; }
+        function updateRole(){ hudRole.textContent=GS.role==='seeker'?'🔴抓捕者':'🟢伪装者'; hudRole.className='role-badge '+(GS.role==='seeker'?'role-seeker':'role-hider'); }
+        function updatePlayerList(){
+            playerListInner.innerHTML='';
+            for(const id in GS.allPlayers){
+                const p=GS.allPlayers[id];
+                const d=document.createElement('div'); d.className='pl-item';
+                if(p.elim) d.className+=' pl-eliminated';
+                d.textContent=(p.role==='seeker'?'🔴':'🟢')+p.name+(p.elim?'💀':'');
+                playerListInner.appendChild(d);
+            }
+        }
+        function openInv(){
+            if(GS.phase!=='preparation'||GS.eliminated) return;
+            GS.inventoryOpen=true; inventoryPanel.style.display='flex'; inventoryPanel.innerHTML='';
+            if(GS.role==='hider'){
+                ['橡木','木板','圆石','草','泥土','树叶','干草块','石砖'].forEach((name,i)=>{
+                    const s=document.createElement('div'); s.className='inv-slot';
+                    s.textContent=name; s.onclick=()=>{ GS.selectedSlot=['oak_log','oak_planks','cobble','grass','dirt','leaves','hay','stone'][i]; };
+                    inventoryPanel.appendChild(s);
+                });
+            } else {
+                ['石剑','铁剑','金剑'].forEach((name,i)=>{
+                    const s=document.createElement('div'); s.className='inv-slot';
+                    s.textContent=name; s.onclick=()=>{ GS.selectedSlot=['stone_sword','iron_sword','golden_sword'][i]; };
+                    inventoryPanel.appendChild(s);
+                });
+            }
+        }
+        function confirmInv(){
+            if(!GS.selectedSlot) return;
+            if(GS.role==='hider'){ GS.disguiseBlock=GS.selectedSlot; GS.isDisguised=true; }
+            else GS.weapon=GS.selectedSlot;
+            GS.inventoryOpen=false; inventoryPanel.style.display='none';
+            updateMyModel(); broadcastPos();
+        }
+
+        function createRoom(){
+            GS.roomCode = Math.floor(10000+Math.random()*90000).toString();
+            GS.isHost=true; GS.playerId='host_'+Math.random().toString(36).substr(2,6);
+            GS.playerName='房主'; GS.allPlayers={}; GS.allPlayers[GS.playerId]={name:'房主',role:null,pos:{x:0,y:2,z:8},disguised:false,block:null,weapon:null,elim:false};
+            roomInput.value=GS.roomCode;
+            initPeer();
+            const url = window.location.href.split('?')[0] + '?room=' + GS.roomCode;
+            shareLinkDiv.innerHTML = '🔗 房间链接：<br><a href="'+url+'" target="_blank" style="color:#c8a84a;">'+url+'</a><br>（可复制或用手机扫码）';
+            showToast('房间已创建，分享链接给其他玩家');
+        }
+        function joinRoom(){
+            const code=roomInput.value.trim();
+            if(!/^\d{5}$/.test(code)){ showToast('请输入5位数字'); return; }
+            GS.roomCode=code; GS.isHost=false; GS.playerId='client_'+Math.random().toString(36).substr(2,6);
+            GS.playerName='玩家'; initPeer(); showToast('正在加入房间...');
+        }
+        function startGame(){
+            if(!GS.isHost) return;
+            const ids=Object.keys(GS.allPlayers);
+            if(ids.length<2){ showToast('至少需要2名玩家'); return; }
+            const si=Math.floor(Math.random()*ids.length);
+            const roles={}; ids.forEach((id,i)=> roles[id]=i===si?'seeker':'hider');
+            ids.forEach(id=>{
+                if(id===GS.playerId){ GS.role=roles[id]; GS.isDisguised=false; GS.weapon=null; }
+                else{ GS.allPlayers[id].role=roles[id]; GS.allPlayers[id].disguised=false; GS.allPlayers[id].weapon=null; }
+            });
+            GS.phase='preparation'; GS.prepTimer=PREPARATION_TIME; GS.round=1;
+            updateMyModel(); updateRole(); closeRoom();
+            broadcast({type:'game_start', roles, allPlayers:GS.allPlayers, round:GS.round, sender:GS.playerId});
+        }
+        function resetLobby(){
+            GS.phase='lobby'; GS.role=null; GS.isDisguised=false; GS.weapon=null; GS.eliminated=false;
+            GS.myPos.set(0,2,8); GS.round=1; GS.seekerW=0; GS.hiderW=0;
+            updateMyModel(); openRoomPanel();
+        }
+        function openRoomPanel(){ roomPanel.style.display='block'; hudEl.style.display='none'; playerListEl.style.display='none'; }
+        function seekerAttack(){
+            if(GS.role!=='seeker'||GS.phase!=='playing'||GS.eliminated||GS.attackCD>0) return;
+            if(!GS.weapon){ showToast('请先选择武器'); return; }
+            GS.attackCD=ATTACK_COOLDOWN;
+            const range=WEAPON_RANGES[GS.weapon]||4;
+            for(const id in GS.allPlayers){
+                const p=GS.allPlayers[id];
+                if(id===GS.playerId||!p||p.role!=='hider'||p.elim) continue;
+                const d=GS.myPos.distanceTo(new THREE.Vector3(p.pos.x,p.pos.y,p.pos.z));
+                if(d<=range){
+                    GS.allPlayers[id].elim=true;
+                    broadcast({type:'eliminated', target:id, sender:GS.playerId});
+                    showToast('击中了一名伪装者！');
+                    break;
+                }
+            }
+        }
+
+        document.addEventListener('keydown', e=>{
+            if(e.key==='e'){ e.preventDefault(); if(GS.phase==='preparation') GS.inventoryOpen?confirmInv():openInv(); }
+            if(['w','a','s','d'].includes(e.key)) GS.keys[e.key]=true;
+        });
+        document.addEventListener('keyup', e=>{ if(['w','a','s','d'].includes(e.key)) GS.keys[e.key]=false; });
+        canvas.addEventListener('mousedown', e=>{ if(e.button===0 && GS.phase==='playing') seekerAttack(); });
+        btnCreate.onclick=createRoom; btnJoin.onclick=joinRoom;
+        window.addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+
+        const clock=new THREE.Clock();
+        let lastBroad=0;
+        function animate(){
+            requestAnimationFrame(animate);
+            const dt=Math.min(clock.getDelta(),0.2);
+            if(GS.phase==='preparation'){
+                GS.prepTimer-=dt; hudTimer.textContent=Math.ceil(GS.prepTimer);
+                if(GS.prepTimer<=0 && GS.isHost){
+                    GS.phase='playing'; GS.gameTimer=GAME_TIME;
+                    if(!GS.weapon&&GS.role==='seeker') GS.weapon='iron_sword';
+                    if(!GS.disguiseBlock&&GS.role==='hider'){ GS.disguiseBlock='oak_log'; GS.isDisguised=true; }
+                    updateMyModel(); broadcastPos();
+                }
+            } else if(GS.phase==='playing'){
+                GS.gameTimer-=dt; hudTimer.textContent=Math.ceil(Math.max(0,GS.gameTimer));
+                if(GS.isHost && GS.gameTimer<=0){
+                    GS.hiderW++; GS.phase='round_end';
+                    broadcast({type:'round_end', winner:'hider', seekerW:GS.seekerW, hiderW:GS.hiderW});
+                    showToast('伪装者获胜！');
+                    setTimeout(()=> GS.round<3?startGame():endGame(), 3000);
+                }
+            }
+            if(GS.attackCD>0) GS.attackCD-=dt;
+            if((GS.phase==='preparation'||GS.phase==='playing')&&!GS.eliminated&&!GS.inventoryOpen){
+                const sp=(GS.isDisguised&&GS.phase==='playing')?HIDER_SPEED:PLAYER_SPEED;
+                const dir=new THREE.Vector3(); camera.getWorldDirection(dir); dir.y=0; dir.normalize();
+                const right=new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0,1,0));
+                const move=new THREE.Vector3();
+                if(GS.keys.w) move.add(dir); if(GS.keys.s) move.sub(dir);
+                if(GS.keys.a) move.sub(right); if(GS.keys.d) move.add(right);
+                if(move.length()>0){ move.normalize(); GS.myPos.x+=move.x*sp*dt; GS.myPos.z+=move.z*sp*dt; }
+                GS.myPos.x=Math.max(-28,Math.min(28,GS.myPos.x));
+                GS.myPos.z=Math.max(-28,Math.min(28,GS.myPos.z));
+            }
+            myGroup.position.copy(GS.myPos);
+            controls.target.lerp(new THREE.Vector3(GS.myPos.x,GS.myPos.y+0.8,GS.myPos.z),0.1);
+            controls.update();
+            if(performance.now()-lastBroad>100){ broadcastPos(); lastBroad=performance.now(); }
+            renderer.render(scene,camera);
+        }
+
+        // 自动加入房间（通过URL参数）
+        const params=new URLSearchParams(window.location.search);
+        if(params.has('room')){
+            roomInput.value=params.get('room');
+            setTimeout(joinRoom, 500);
+        }
+        updateMyModel();
+        openRoomPanel();
+        animate();
+    </script>
+</body>
+</html>
