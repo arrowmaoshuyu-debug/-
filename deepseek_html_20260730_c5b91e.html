@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Minecraft 躲猫猫 · 跨设备版</title>
+    <style>
+        /* 样式与原版一致，仅微调 */
+        :root {
+            --bg: #1a1a1a;
+            --panel-bg: rgba(30, 30, 30, 0.95);
+            --text: #e0d8c8;
+            --gold: #c8a84a;
+            --red: #c0392b;
+            --green: #5a9e4b;
+            --blue: #4a7dc8;
+            --button: #5a4a3a;
+            --button-hover: #7a6a5a;
+            --border: #4a3a2a;
+            --input-bg: #2a2218;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            font-family: 'Courier New', 'SimHei', monospace;
+            background: #000; overflow: hidden;
+            user-select: none; -webkit-user-select: none;
+        }
+        #game-canvas { display:block; position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:1; }
+        #ui-overlay { position:fixed; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:10; }
+        #ui-overlay > * { pointer-events:auto; }
+        #room-panel {
+            position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+            background:var(--panel-bg); border:3px solid var(--border); border-radius:12px;
+            padding:25px 35px; text-align:center; color:var(--text);
+            box-shadow:0 20px 60px rgba(0,0,0,0.7); min-width:380px;
+            backdrop-filter:blur(10px); max-width:95vw;
+        }
+        #room-panel h1 { font-size:1.8em; margin-bottom:4px; color:var(--gold); letter-spacing:2px; }
+        .subtitle { font-size:0.8em; color:#aaa; margin-bottom:15px; }
+        #room-panel label { display:block; margin:10px 0 4px; font-weight:bold; color:#ccc; }
+        #room-panel input {
+            width:100%; padding:10px 14px; font-size:1.3em; text-align:center;
+            letter-spacing:5px; background:var(--input-bg); border:2px solid var(--border);
+            border-radius:8px; color:var(--gold); font-family:'Courier New',monospace;
+            outline:none; transition:border-color 0.3s;
+        }
+        #room-panel input:focus { border-color:var(--gold); }
+        #room-panel button {
+            margin:8px 5px; padding:10px 24px; font-size:1em; cursor:pointer;
+            background:var(--button); color:var(--text); border:2px solid var(--border);
+            border-radius:8px; letter-spacing:1px; font-weight:bold; transition:all 0.2s;
+            font-family:'Courier New','SimHei',monospace;
+        }
+        #room-panel button:hover { background:var(--button-hover); border-color:var(--gold); }
+        #room-panel button.primary { background:#5a7a3a; border-color:#6a9a4a; color:#fff; }
+        #room-panel button.primary:hover { background:#6a9a4a; }
+        #qrcode-container { margin:15px auto 0; width:120px; height:120px; background:#fff; padding:8px; border-radius:8px; }
+        #hud {
+            position:absolute; top:15px; left:50%; transform:translateX(-50%);
+            display:flex; gap:15px; align-items:center; background:var(--panel-bg);
+            padding:8px 20px; border-radius:30px; border:2px solid var(--border);
+            color:var(--text); font-size:0.9em; backdrop-filter:blur(8px);
+        }
+        .timer { color:var(--gold); font-weight:bold; font-size:1.2em; min-width:45px; text-align:center; }
+        .role-badge { padding:4px 12px; border-radius:14px; font-weight:bold; }
+        .role-seeker { background:#c0392b; color:#fff; } .role-hider { background:#5a9e4b; color:#fff; }
+        #inventory-panel {
+            position:absolute; bottom:70px; left:50%; transform:translateX(-50%);
+            background:var(--panel-bg); border:3px solid var(--border); border-radius:12px;
+            padding:14px 18px; display:none; flex-wrap:wrap; gap:8px; max-width:650px;
+            justify-content:center; backdrop-filter:blur(10px);
+        }
+        .inv-slot {
+            width:55px; height:55px; background:#2a2218; border:2px solid #5a4a3a;
+            border-radius:8px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+            flex-direction:column; transition:all 0.2s; color:#aaa; font-size:0.65em;
+        }
+        .inv-slot:hover { border-color:var(--gold); background:#3a3228; }
+        .inv-slot.selected { border-color:#ffcc00; background:#4a3a20; }
+        .inv-slot .slot-icon { width:30px; height:30px; border-radius:4px; }
+        #message-toast {
+            position:absolute; top:50%; left:50%; transform:translate(-50%,-50%) scale(0);
+            background:var(--panel-bg); border:2px solid var(--gold); border-radius:16px;
+            padding:16px 30px; color:var(--gold); font-size:1.2em; font-weight:bold;
+            transition:transform 0.3s; pointer-events:none; backdrop-filter:blur(10px);
+        }
+        #message-toast.show { transform:translate(-50%,-50%) scale(1); }
+        #player-list {
+            position:absolute; top:110px; right:15px; background:var(--panel-bg);
+            border:2px solid var(--border); border-radius:10px; padding:10px 14px;
+            color:var(--text); font-size:0.75em; backdrop-filter:blur(8px);
+        }
+        #player-list h4 { color:var(--gold); margin-bottom:6px; text-align:center; }
+        .pl-item { padding:3px 6px; margin:2px 0; border-radius:4px; font-size:0.8em; }
+        .pl-seeker { color:#ff6b6b; } .pl-hider { color:#7bff6b; } .pl-eliminated { color:#888; text-decoration:line-through; }
+        #controls-hint {
+            position:absolute; bottom:15px; left:50%; transform:translateX(-50%);
+            color:#888; font-size:0.7em; background:rgba(0,0,0,0.5); padding:5px 14px; border-radius:14px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="game-canvas"></canvas>
+    <div id="ui-overlay">
+        <div id="room-panel">
+            <h1>🏠 躲猫猫</h1>
+            <div class="subtitle">跨设备联机 · 扫描二维码加入</div>
+            <label for="room-input">房间号码</label>
+            <input type="text" id="room-input" maxlength="5" placeholder="_____" autocomplete="off">
+            <br>
+            <button class="primary" id="btn-create">🎲 创建房间</button>
+            <button id="btn-join">🚪 加入房间</button>
+            <div id="qrcode-container"></div>
+            <div style="margin-top:8px;font-size:0.7em;color:#777;">
+                房主创建后，分享链接或扫码即可加入
+            </div>
+        </div>
+        <div id="hud" style="display:none;">
+            <span id="hud-round">回合 1/3</span>
+            <span class="timer" id="hud-timer">30</span>
+            <span id="hud-role" class="role-badge">等待中...</span>
+            <span id="hud-score">比分 0:0</span>
+        </div>
+        <div id="inventory-panel"></div>
+        <div id="message-toast"></div>
+        <div id="player-list" style="display:none;">
+            <h4>👥 玩家</h4>
+            <div id="player-list-inner"></div>
+        </div>
+        <div id="controls-hint">WASD移动 | 鼠标旋转 | E选择 | 左键攻击(抓捕者)</div>
+    </div>
+
+    <!-- 引入依赖 -->
+    <script src="https://unpkg.com/three@0.160.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+
+    <script>
+        // ==================== 常量 ====================
+        const PREPARATION_TIME = 30;
+        const GAME_TIME = 180;
+        const TOTAL_ROUNDS = 3;
+        const WORLD_SIZE = 60;
+        const PLAYER_SPEED = 6;
+        const HIDER_SPEED = 3.5;
+        const ATTACK_COOLDOWN = 0.8;
+        const WEAPON_RANGES = { 'stone_sword': 3.5, 'iron_sword': 4.5, 'golden_sword': 4.0 };
+
+        // ==================== DOM ====================
+        const canvas = document.getElementById('game-canvas');
+        const roomPanel = document.getElementById('room-panel');
+        const roomInput = document.getElementById('room-input');
+        const btnCreate = document.getElementById('btn-create');
+        const btnJoin = document.getElementById('btn-join');
+        const hudEl = document.getElementById('hud');
+        const hudTimer = document.getElementById('hud-timer');
+        const hudRound = document.getElementById('hud-round');
+        const hudRole = document.getElementById('hud-role');
+        const hudScore = document.getElementById('hud-score');
+        const inventoryPanel = document.getElementById('inventory-panel');
+        const messageToast = document.getElementById('message-toast');
+        const playerListEl = document.getElementById('player-list');
+        const playerListInner = document.getElementById('player-list-inner');
+        const qrcodeContainer = document.getElementById('qrcode-container');
+
+        // ==================== Three.js 初始化 ====================
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.1;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color('#87CEEB');
+        scene.fog = new THREE.Fog('#c8d8f0', 40, 100);
+
+        const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.5, 120);
+        camera.position.set(20, 18, 25);
+        camera.lookAt(0, 0, 0);
+
+        const orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+        orbitControls.target.set(0, 2, 0);
+        orbitControls.enableDamping = true;
+        orbitControls.dampingFactor = 0.12;
+        orbitControls.minDistance = 3;
+        orbitControls.maxDistance = 50;
+        orbitControls.maxPolarAngle = Math.PI * 0.75;
+        orbitControls.update();
+
+        // 光照
+        const ambientLight = new THREE.AmbientLight('#bcd4f0', 1.4);
+        scene.add(ambientLight);
+        const sunLight = new THREE.DirectionalLight('#fff8e8', 4.5);
+        sunLight.position.set(40, 50, 20);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 150;
+        sunLight.shadow.camera.left = -50;
+        sunLight.shadow.camera.right = 50;
+        sunLight.shadow.camera.top = 50;
+        sunLight.shadow.camera.bottom = -50;
+        scene.add(sunLight);
+        scene.add(new THREE.HemisphereLight('#87CEEB', '#6b8a3a', 0.9));
+
+        // ==================== 材质与方块构建 (同原版) ====================
+        function mMat(hex, r=0.85, m=0.0) { return new THREE.MeshStandardMaterial({color:new THREE.Color(hex), roughness:r, metalness:m}); }
+        const grassMat = mMat('#7CBD4B',0.9);
+        const dirtPathMat = mMat('#B8A878',0.95);
+        const cobbleMat = mMat('#7F7F7F',0.8);
+        const oakLogMat = mMat('#9D7A4D',0.85);
+        const oakPlankMat = mMat('#C8A87C',0.9);
+        const leavesMat = mMat('#4C8F3B',0.9,0.05);
+        const waterMat = new THREE.MeshStandardMaterial({color:'#3F76E4', roughness:0.3, metalness:0.2, transparent:true, opacity:0.75});
+        const lavaMat = new THREE.MeshStandardMaterial({color:'#FF6A00', roughness:0.2, metalness:0.1, emissive:'#FF3D00', emissiveIntensity:2.5});
+        const anvilMat = mMat('#4F4F4F',0.7,0.6);
+        const hayMat = mMat('#C8C443',0.9);
+        const cropGreenMat = mMat('#6AA84F',0.9);
+        const cropYellowMat = mMat('#C8B83A',0.9);
+        const stoneBrickMat = mMat('#A0A0A0',0.8);
+        const fenceMat = mMat('#B8956A',0.85);
+        const roofTileMat = mMat('#8B3A3A',0.85);
+
+        function createBox(w,h,d,mat,cast=true,recv=true) {
+            const geo = new THREE.BoxGeometry(w,h,d);
+            const mesh = new THREE.Mesh(geo,mat);
+            mesh.castShadow = cast; mesh.receiveShadow = recv;
+            return mesh;
+        }
+
+        // ==================== 村庄构建 (与原版完全相同，略做精简保留核心) ====================
+        function createGround() {
+            const g = new THREE.Group();
+            g.add(createBox(WORLD_SIZE,0.3,WORLD_SIZE,grassMat,false,true).translateY(-0.15));
+            g.add(createBox(WORLD_SIZE,1.5,WORLD_SIZE,mMat('#8B6B3A',0.95),false,false).translateY(-0.9));
+            return g;
+        }
+        function createDirtPaths() {
+            const g = new THREE.Group();
+            [[0,0,3,22],[-8,6,16,2.5],[8,-4,2.5,14],[-4,-6,20,2.5],[6,8,2.5,12]].forEach(p=>{
+                const path = createBox(p[2],0.05,p[3],dirtPathMat,false,true);
+                path.position.set(p[0],0.16,p[1]); g.add(path);
+            });
+            return g;
+        }
+        function createHouse(x,z,ry=0) {
+            const g = new THREE.Group();
+            g.add(createBox(7,0.5,7,cobbleMat).translateY(0.25));
+            const wallH=4;
+            g.add(createBox(2.5,wallH,0.4,oakPlankMat).translate(-1.8,wallH/2+0.5,3.3));
+            g.add(createBox(2.5,wallH,0.4,oakPlankMat).translate(1.8,wallH/2+0.5,3.3));
+            g.add(createBox(6.6,0.5,0.4,oakPlankMat).translate(0,wallH+0.75,3.3));
+            g.add(createBox(7,wallH,0.4,oakPlankMat).translate(0,wallH/2+0.5,-3.3));
+            g.add(createBox(0.4,wallH,6.6,oakPlankMat).translate(-3.3,wallH/2+0.5,0));
+            g.add(createBox(0.4,wallH,6.6,oakPlankMat).translate(3.3,wallH/2+0.5,0));
+            const roof = new THREE.Group();
+            for(let i=0;i<6;i++) roof.add(createBox(7.5-i*1.1,0.5,7.5-i*1.1,roofTileMat).translate(0,wallH+0.5+i*0.45,0));
+            roof.add(createBox(1.5,0.6,7.5,roofTileMat).translate(0,wallH+0.5+6*0.45+0.2,0));
+            g.add(roof);
+            g.position.set(x,0,z); g.rotation.y=ry; return g;
+        }
+        function createWell(x,z) {
+            const g = new THREE.Group();
+            g.add(createBox(3.5,2,3.5,mMat('#C8C0B8',0.8)).translateY(1));
+            g.add(createBox(2.2,0.3,2.2,new THREE.MeshStandardMaterial({color:'#3F76E4',roughness:0.3,transparent:true,opacity:0.8})).translateY(1.9));
+            g.add(createBox(2,0.1,2,waterMat).translateY(1.85));
+            g.add(createBox(0.4,3,0.4,fenceMat).translate(-1.4,2.5,-1.4));
+            g.add(createBox(0.4,3,0.4,fenceMat).translate(1.4,2.5,1.4));
+            g.add(createBox(3.2,0.3,0.4,fenceMat).translate(0,3.8,0));
+            g.position.set(x,0,z); return g;
+        }
+        function createBlacksmith(x,z) {
+            const g = new THREE.Group();
+            g.add(createBox(6,0.6,6,stoneBrickMat).translateY(0.3));
+            g.add(createBox(2,0.15,2,lavaMat).translate(1.5,0.65,-1));
+            g.add(createBox(1.4,0.6,1,anvilMat).translate(-1.5,1,0));
+            g.add(createBox(1.6,0.35,0.8,anvilMat).translate(-1.5,1.45,0));
+            g.add(createBox(1.5,2,1.5,cobbleMat).translate(-2.5,1.5,1.5));
+            g.position.set(x,0,z); return g;
+        }
+        function createFarmland(x,z) {
+            const g = new THREE.Group();
+            g.add(createBox(5,0.4,8,mMat('#6B4226',0.95)).translateY(0.2));
+            g.add(createBox(0.8,0.2,7.5,waterMat).translateY(0.35));
+            for(let row=-1;row<=1;row+=2)
+                for(let i=-3;i<=3;i++) g.add(createBox(0.35,0.3+Math.random()*0.5,0.35,Math.random()>0.4?cropGreenMat:cropYellowMat).translate(row*1.4,0.4,i*0.9));
+            g.add(createBox(1.2,1.2,1.2,hayMat).translate(2.8,0.8,-2.5));
+            g.add(createBox(1.2,1.2,1.2,hayMat).translate(-2.8,0.8,2.5));
+            g.position.set(x,0,z); return g;
+        }
+        function createTree(x,z) {
+            const g = new THREE.Group();
+            const h=4+Math.random()*2;
+            g.add(createBox(0.7,h,0.7,oakLogMat).translateY(h/2));
+            for(let l=0;l<3+Math.floor(Math.random()*2);l++) g.add(createBox(3.5-l*0.7,1.2,3.5-l*0.7,leavesMat).translateY(h-0.5+l*0.9));
+            g.position.set(x,0,z); return g;
+        }
+        function createLanternFence(x,z,ry=0) {
+            const g = new THREE.Group();
+            g.add(createBox(0.3,2.5,0.3,fenceMat).translate(-1.5,1.25,0));
+            g.add(createBox(0.3,2.5,0.3,fenceMat).translate(1.5,1.25,0));
+            g.add(createBox(3.3,0.2,0.2,fenceMat).translate(0,2.2,0));
+            const lantern = createBox(0.5,0.7,0.5,new THREE.MeshStandardMaterial({color:'#FFDD88',roughness:0.2,emissive:'#FFAA33',emissiveIntensity:3}));
+            lantern.position.set(0,2.7,0); g.add(lantern);
+            g.position.set(x,0,z); g.rotation.y=ry; return g;
+        }
+        function buildVillage() {
+            const v = new THREE.Group();
+            v.add(createGround()); v.add(createDirtPaths());
+            v.add(createWell(0,0)); v.add(createHouse(-9,7,0.15)); v.add(createHouse(9,-6,-0.2));
+            v.add(createHouse(-8,-7,0.3)); v.add(createBlacksmith(10,5));
+            v.add(createFarmland(-7,9)); v.add(createFarmland(7,-9));
+            v.add(createTree(-14,3)); v.add(createTree(14,-3)); v.add(createTree(-12,-10)); v.add(createTree(13,9)); v.add(createTree(3,14));
+            v.add(createLanternFence(-5,4,0.4)); v.add(createLanternFence(5,-3,-0.3));
+            return v;
+        }
+        scene.add(buildVillage());
+
+        // ==================== 游戏状态 ====================
+        const GAME_STATE = {
+            phase: 'lobby',
+            roomCode: null,
+            isHost: false,
+            playerId: null,
+            playerName: '',
+            role: null,
+            myPosition: new THREE.Vector3(0,2,8),
+            myVelocity: new THREE.Vector3(),
+            isDisguised: false,
+            disguiseBlockType: null,
+            weaponType: null,
+            isEliminated: false,
+            attackCooldown: 0,
+            roundNumber: 1,
+            seekerWins: 0,
+            hiderWins: 0,
+            preparationTimer: PREPARATION_TIME,
+            gameTimer: GAME_TIME,
+            allPlayers: {},
+            keys: { w:false,a:false,s:false,d:false,space:false,shift:false,e:false },
+            inventoryOpen: false,
+            selectedInventorySlot: null,
+            peer: null,
+            connections: [], // 房主持有的所有连接
+            hostConn: null,  // 客户端持有的与房主的连接
+            qrcode: null,
+        };
+
+        // ==================== PeerJS 通信 ====================
+        function initPeerAndRoom() {
+            const code = GAME_STATE.roomCode;
+            // 使用房间码作为Peer ID的一部分，避免与其他房间冲突
+            const peerId = GAME_STATE.isHost ? code : code + '-client-' + Math.random().toString(36).substring(2,8);
+            const peer = new Peer(peerId, { debug: 0 });
+            GAME_STATE.peer = peer;
+
+            peer.on('open', (id) => {
+                console.log('Peer 已打开，ID:', id);
+                if (GAME_STATE.isHost) {
+                    // 房主等待连接
+                    peer.on('connection', (conn) => {
+                        console.log('新玩家连接:', conn.peer);
+                        GAME_STATE.connections.push(conn);
+                        setupConnection(conn);
+                        // 发送当前游戏状态
+                        conn.send({ type:'join_accept', allPlayers: GAME_STATE.allPlayers, hostId: GAME_STATE.playerId });
+                    });
+                } else {
+                    // 客户端连接房主
+                    const hostPeerId = code;
+                    const conn = peer.connect(hostPeerId, { reliable: true });
+                    GAME_STATE.hostConn = conn;
+                    setupConnection(conn);
+                    conn.on('open', () => {
+                        console.log('已连接到房主');
+                        conn.send({ type:'join_request', playerName: GAME_STATE.playerName });
+                    });
+                }
+            });
+
+            peer.on('error', (err) => {
+                console.error('Peer错误:', err);
+                showToast('连接错误，请刷新重试');
+            });
+        }
+
+        function setupConnection(conn) {
+            conn.on('data', (data) => {
+                handleNetworkMessage(data, conn.peer);
+            });
+            conn.on('close', () => {
+                // 移除断开的连接
+                if (GAME_STATE.isHost) {
+                    GAME_STATE.connections = GAME_STATE.connections.filter(c => c.peer !== conn.peer);
+                    // 移除该玩家
+                    const pidToRemove = Object.keys(GAME_STATE.allPlayers).find(pid => GAME_STATE.allPlayers[pid].peerId === conn.peer);
+                    if (pidToRemove) {
+                        delete GAME_STATE.allPlayers[pidToRemove];
+                        broadcastToAll({ type:'player_list_update', allPlayers: GAME_STATE.allPlayers });
+                        updatePlayerListUI();
+                    }
+                }
+            });
+        }
+
+        function broadcastToAll(msg) {
+            if (!GAME_STATE.isHost) return;
+            GAME_STATE.connections.forEach(conn => {
+                if (conn.open) conn.send(msg);
+            });
+        }
+
+        function sendToHost(msg) {
+            if (GAME_STATE.hostConn && GAME_STATE.hostConn.open) {
+                GAME_STATE.hostConn.send(msg);
+            }
+        }
+
+        function handleNetworkMessage(msg, senderPeerId) {
+            if (msg.senderId === GAME_STATE.playerId) return;
+            switch (msg.type) {
+                case 'join_request':
+                    if (GAME_STATE.isHost && GAME_STATE.phase === 'lobby') {
+                        const newPlayerId = 'p_' + Math.random().toString(36).substring(2,10);
+                        GAME_STATE.allPlayers[newPlayerId] = {
+                            name: msg.playerName || '玩家',
+                            role: null, position: {x:0,y:2,z:8}, isDisguised:false,
+                            disguiseBlockType:null, weaponType:null, isEliminated:false,
+                            peerId: senderPeerId
+                        };
+                        broadcastToAll({ type:'player_list_update', allPlayers: GAME_STATE.allPlayers });
+                        updatePlayerListUI();
+                    }
+                    break;
+                case 'join_accept':
+                    GAME_STATE.allPlayers = msg.allPlayers || {};
+                    updatePlayerListUI();
+                    break;
+                case 'player_list_update':
+                    GAME_STATE.allPlayers = msg.allPlayers || GAME_STATE.allPlayers;
+                    updatePlayerListUI();
+                    break;
+                case 'game_start':
+                    GAME_STATE.phase = 'preparation';
+                    GAME_STATE.preparationTimer = PREPARATION_TIME;
+                    GAME_STATE.role = msg.roles[GAME_STATE.playerId] || 'hider';
+                    GAME_STATE.allPlayers = msg.allPlayers;
+                    GAME_STATE.roundNumber = msg.roundNumber || 1;
+                    updateRoleUI(); updatePlayerListUI(); closeRoomPanel();
+                    showToast('游戏开始！你是'+(GAME_STATE.role==='seeker'?'🔴抓捕者':'🟢伪装者'));
+                    break;
+                case 'position_update':
+                    if (msg.playerId && GAME_STATE.allPlayers[msg.playerId]) {
+                        GAME_STATE.allPlayers[msg.playerId].position = msg.position;
+                        GAME_STATE.allPlayers[msg.playerId].isDisguised = msg.isDisguised;
+                        GAME_STATE.allPlayers[msg.playerId].disguiseBlockType = msg.disguiseBlockType;
+                        GAME_STATE.allPlayers[msg.playerId].weaponType = msg.weaponType;
+                        GAME_STATE.allPlayers[msg.playerId].isEliminated = msg.isEliminated;
+                    }
+                    break;
+                case 'player_eliminated':
+                    if (GAME_STATE.allPlayers[msg.targetId]) {
+                        GAME_STATE.allPlayers[msg.targetId].isEliminated = true;
+                        updatePlayerListUI();
+                        if (msg.targetId === GAME_STATE.playerId) {
+                            GAME_STATE.isEliminated = true;
+                            showToast('你被抓住了！💀');
+                        }
+                    }
+                    break;
+                case 'round_end':
+                    GAME_STATE.phase = 'round_end';
+                    GAME_STATE.seekerWins = msg.seekerWins; GAME_STATE.hiderWins = msg.hiderWins;
+                    showToast(msg.winner==='seeker'?'🔴抓捕者获胜！':'🟢伪装者获胜！');
+                    updateScoreUI();
+                    if (GAME_STATE.isHost) setTimeout(()=>{
+                        if(GAME_STATE.roundNumber < TOTAL_ROUNDS) startNewRound(); else endGame();
+                    }, 3000);
+                    break;
+                case 'game_over':
+                    GAME_STATE.phase = 'game_over';
+                    GAME_STATE.seekerWins = msg.seekerWins; GAME_STATE.hiderWins = msg.hiderWins;
+                    updateScoreUI();
+                    showToast('🏆游戏结束！'+(GAME_STATE.seekerWins>GAME_STATE.hiderWins?'抓捕者':'伪装者')+'获胜！');
+                    setTimeout(()=>resetToLobby(), 5000);
+                    break;
+                case 'reset_to_lobby': resetToLobby(); break;
+            }
+        }
+
+        function broadcastPosition() {
+            const posMsg = {
+                type:'position_update',
+                playerId: GAME_STATE.playerId,
+                position:{x:GAME_STATE.myPosition.x, y:GAME_STATE.myPosition.y, z:GAME_STATE.myPosition.z},
+                isDisguised:GAME_STATE.isDisguised, disguiseBlockType:GAME_STATE.disguiseBlockType,
+                weaponType:GAME_STATE.weaponType, isEliminated:GAME_STATE.isEliminated,
+                senderId: GAME_STATE.playerId
+            };
+            if (GAME_STATE.isHost) broadcastToAll(posMsg);
+            else sendToHost(posMsg);
+        }
+
+        // ==================== 玩家模型 (同原版) ====================
+        const myPlayerGroup = new THREE.Group();
+        let myDisguiseModel = null;
+        const playerModels = {};
+        scene.add(myPlayerGroup);
+        myPlayerGroup.position.copy(GAME_STATE.myPosition);
+
+        function createDisguiseBlock(type) {
+            const mats = { oak_log:oakLogMat, oak_planks:oakPlankMat, cobblestone:cobbleMat, grass_block:grassMat, dirt:mMat('#8B6B3A',0.95), leaves:leavesMat, bookshelf:mMat('#C8A87C',0.85), furnace:cobbleMat, hay_bale:hayMat, stone_bricks:stoneBrickMat, anvil:anvilMat, roof_tile:roofTileMat };
+            const mat = mats[type] || oakLogMat;
+            return new THREE.Mesh(new THREE.BoxGeometry(1,1,1), mat.clone());
+        }
+        function updateMyModel() {
+            myPlayerGroup.clear();
+            if (GAME_STATE.isEliminated) { myPlayerGroup.visible=false; return; }
+            myPlayerGroup.visible=true;
+            if (GAME_STATE.isDisguised && GAME_STATE.disguiseBlockType) {
+                const block = createDisguiseBlock(GAME_STATE.disguiseBlockType);
+                myPlayerGroup.add(block);
+            } else {
+                const body = new THREE.Group();
+                body.add(createBox(0.7,1.2,0.5,mMat('#8B6914',0.85)).translateY(0.85));
+                body.add(createBox(0.6,0.6,0.6,mMat('#D4A574',0.7)).translateY(1.75));
+                myPlayerGroup.add(body);
+            }
+        }
+        function updateOtherModels() {
+            for (const pid in GAME_STATE.allPlayers) {
+                if (pid === GAME_STATE.playerId) continue;
+                if (playerModels[pid]) scene.remove(playerModels[pid]);
+                const p = GAME_STATE.allPlayers[pid];
+                if (!p || p.isEliminated) continue;
+                const g = new THREE.Group();
+                if (p.isDisguised && p.disguiseBlockType) g.add(createDisguiseBlock(p.disguiseBlockType));
+                else { const b = new THREE.Group(); b.add(createBox(0.7,1.2,0.5,mMat('#8B6914',0.85)).translateY(0.85)); g.add(b); }
+                g.position.set(p.position.x||0, p.position.y||2, p.position.z||8);
+                scene.add(g);
+                playerModels[pid] = g;
+            }
+        }
+
+        // ==================== UI函数 ====================
+        function showToast(msg, dur=2000) {
+            messageToast.textContent=msg; messageToast.classList.add('show');
+            clearTimeout(messageToast._t); messageToast._t=setTimeout(()=>messageToast.classList.remove('show'),dur);
+        }
+        function closeRoomPanel() { roomPanel.style.display='none'; hudEl.style.display='flex'; playerListEl.style.display='block'; }
+        function openRoomPanel() { roomPanel.style.display='block'; hudEl.style.display='none'; playerListEl.style.display='none'; inventoryPanel.style.display='none'; }
+        function updateRoleUI() {
+            hudRole.textContent = GAME_STATE.role==='seeker'?'🔴抓捕者':GAME_STATE.role==='hider'?'🟢伪装者':'等待中';
+            hudRole.className = 'role-badge '+(GAME_STATE.role==='seeker'?'role-seeker':GAME_STATE.role==='hider'?'role-hider':'');
+        }
+        function updateScoreUI() { hudScore.textContent=`比分 ${GAME_STATE.seekerWins}:${GAME_STATE.hiderWins}`; hudRound.textContent=`回合 ${GAME_STATE.roundNumber}/${TOTAL_ROUNDS}`; }
+        function updatePlayerListUI() {
+            playerListInner.innerHTML='';
+            for (const pid in GAME_STATE.allPlayers) {
+                const p = GAME_STATE.allPlayers[pid];
+                const div = document.createElement('div'); div.className='pl-item';
+                if (p.isEliminated) div.className+=' pl-eliminated';
+                else if (p.role==='seeker') div.className+=' pl-seeker';
+                else if (p.role==='hider') div.className+=' pl-hider';
+                div.textContent = (p.role==='seeker'?'🔴':'🟢')+' '+p.name+(p.isEliminated?'💀':'');
+                playerListInner.appendChild(div);
+            }
+        }
+        function openInventory() {
+            if (GAME_STATE.phase!=='preparation'||GAME_STATE.isEliminated) return;
+            GAME_STATE.inventoryOpen=true; inventoryPanel.style.display='flex'; inventoryPanel.innerHTML='';
+            if (GAME_STATE.role==='hider') {
+                ['oak_log','oak_planks','cobblestone','grass_block','dirt','leaves','hay_bale','stone_bricks'].forEach(b=>{
+                    const s=document.createElement('div'); s.className='inv-slot';
+                    s.innerHTML=`<div class="slot-icon" style="background:${b==='oak_log'?'#9D7A4D':'#aaa'}"></div>${b}`;
+                    s.onclick=()=>{ GAME_STATE.selectedInventorySlot=b; s.classList.add('selected'); };
+                    inventoryPanel.appendChild(s);
+                });
+            } else {
+                ['stone_sword','iron_sword','golden_sword'].forEach(w=>{
+                    const s=document.createElement('div'); s.className='inv-slot';
+                    s.innerHTML=`<div>⚔️</div>${w}`;
+                    s.onclick=()=>{ GAME_STATE.selectedInventorySlot=w; s.classList.add('selected'); };
+                    inventoryPanel.appendChild(s);
+                });
+            }
+        }
+        function confirmSelection() {
+            if (!GAME_STATE.selectedInventorySlot) return;
+            if (GAME_STATE.role==='hider') { GAME_STATE.disguiseBlockType=GAME_STATE.selectedInventorySlot; GAME_STATE.isDisguised=true; }
+            else GAME_STATE.weaponType=GAME_STATE.selectedInventorySlot;
+            GAME_STATE.inventoryOpen=false; inventoryPanel.style.display='none';
+            updateMyModel(); broadcastPosition();
+        }
+
+        // ==================== 游戏流程 ====================
+        function createRoom() {
+            const code = Math.floor(10000+Math.random()*90000).toString();
+            GAME_STATE.roomCode = code;
+            GAME_STATE.isHost = true;
+            GAME_STATE.playerId = 'host_' + Math.random().toString(36).substring(2,8);
+            GAME_STATE.playerName = '房主';
+            GAME_STATE.allPlayers = {};
+            GAME_STATE.allPlayers[GAME_STATE.playerId] = { name:'房主', role:null, position:{x:0,y:2,z:8}, isDisguised:false, disguiseBlockType:null, weaponType:null, isEliminated:false, peerId:null };
+            roomInput.value = code;
+            initPeerAndRoom();
+            updatePlayerListUI();
+            generateQRCode();
+            showToast('房间已创建，分享链接或扫码加入', 3000);
+        }
+        function joinRoom() {
+            const code = roomInput.value.trim();
+            if (!/^\d{5}$/.test(code)) { showToast('请输入5位数字房间号'); return; }
+            GAME_STATE.roomCode = code;
+            GAME_STATE.isHost = false;
+            GAME_STATE.playerId = 'client_' + Math.random().toString(36).substring(2,8);
+            GAME_STATE.playerName = '玩家';
+            initPeerAndRoom();
+            showToast('正在加入房间...', 2000);
+        }
+        function startGame() {
+            if (!GAME_STATE.isHost) return;
+            const ids = Object.keys(GAME_STATE.allPlayers);
+            if (ids.length < 2) { showToast('至少需要2名玩家'); return; }
+            const seekerIndex = Math.floor(Math.random()*ids.length);
+            const roles = {};
+            ids.forEach((id,i)=>{ roles[id] = i===seekerIndex?'seeker':'hider'; });
+            ids.forEach(id=>{
+                if (id===GAME_STATE.playerId) { GAME_STATE.role=roles[id]; GAME_STATE.isDisguised=false; GAME_STATE.weaponType=null; }
+                else { GAME_STATE.allPlayers[id].role=roles[id]; GAME_STATE.allPlayers[id].isDisguised=false; GAME_STATE.allPlayers[id].weaponType=null; }
+            });
+            GAME_STATE.phase='preparation'; GAME_STATE.preparationTimer=PREPARATION_TIME;
+            GAME_STATE.roundNumber=GAME_STATE.roundNumber||1;
+            updateMyModel(); updateRoleUI(); updateScoreUI(); closeRoomPanel();
+            broadcastToAll({ type:'game_start', roles, allPlayers:GAME_STATE.allPlayers, roundNumber:GAME_STATE.roundNumber, senderId:GAME_STATE.playerId });
+        }
+        function startNewRound() {
+            GAME_STATE.roundNumber++; GAME_STATE.phase='preparation'; GAME_STATE.preparationTimer=PREPARATION_TIME;
+            GAME_STATE.isDisguised=false; GAME_STATE.weaponType=null; GAME_STATE.isEliminated=false;
+            GAME_STATE.myPosition.set(0,2,8);
+            const ids = Object.keys(GAME_STATE.allPlayers);
+            const si = Math.floor(Math.random()*ids.length);
+            const roles = {};
+            ids.forEach((id,i)=>{ roles[id]=i===si?'seeker':'hider'; });
+            ids.forEach(id=>{
+                if (id===GAME_STATE.playerId) GAME_STATE.role=roles[id];
+                else { GAME_STATE.allPlayers[id].role=roles[id]; GAME_STATE.allPlayers[id].isDisguised=false; }
+            });
+            updateMyModel(); updateRoleUI(); updateScoreUI();
+            broadcastToAll({ type:'game_start', roles, allPlayers:GAME_STATE.allPlayers, roundNumber:GAME_STATE.roundNumber, senderId:GAME_STATE.playerId });
+        }
+        function endGame() {
+            GAME_STATE.phase='game_over';
+            broadcastToAll({ type:'game_over', seekerWins:GAME_STATE.seekerWins, hiderWins:GAME_STATE.hiderWins, senderId:GAME_STATE.playerId });
+            setTimeout(()=>resetToLobby(), 5000);
+        }
+        function resetToLobby() {
+            GAME_STATE.phase='lobby'; GAME_STATE.role=null; GAME_STATE.isDisguised=false; GAME_STATE.weaponType=null;
+            GAME_STATE.roundNumber=1; GAME_STATE.seekerWins=0; GAME_STATE.hiderWins=0;
+            GAME_STATE.myPosition.set(0,2,8); GAME_STATE.isEliminated=false;
+            updateMyModel(); updatePlayerListUI(); openRoomPanel();
+            if (GAME_STATE.isHost) {
+                GAME_STATE.allPlayers = {};
+                GAME_STATE.allPlayers[GAME_STATE.playerId] = { name:'房主', role:null, position:{x:0,y:2,z:8}, isDisguised:false, disguiseBlockType:null, weaponType:null, isEliminated:false };
+                broadcastToAll({ type:'reset_to_lobby' });
+            }
+        }
+        function seekerAttack() {
+            if (GAME_STATE.role!=='seeker'||GAME_STATE.phase!=='playing'||GAME_STATE.isEliminated||GAME_STATE.attackCooldown>0) return;
+            if (!GAME_STATE.weaponType) { showToast('请先选择武器'); return; }
+            GAME_STATE.attackCooldown = ATTACK_COOLDOWN;
+            const range = WEAPON_RANGES[GAME_STATE.weaponType]||4;
+            let hit = false;
+            for (const pid in GAME_STATE.allPlayers) {
+                const p = GAME_STATE.allPlayers[pid];
+                if (pid===GAME_STATE.playerId||!p||p.role!=='hider'||p.isEliminated) continue;
+                const dist = GAME_STATE.myPosition.distanceTo(new THREE.Vector3(p.position.x, p.position.y, p.position.z));
+                if (dist <= range) {
+                    GAME_STATE.allPlayers[pid].isEliminated = true;
+                    broadcastToAll({ type:'player_eliminated', targetId:pid, senderId:GAME_STATE.playerId });
+                    hit = true;
+                    break;
+                }
+            }
+            if (!hit) showToast('攻击落空...',1000);
+        }
+        function generateQRCode() {
+            qrcodeContainer.innerHTML = '';
+            const url = window.location.href.split('?')[0] + '?room=' + GAME_STATE.roomCode;
+            new QRCode(qrcodeContainer, { text: url, width:110, height:110, colorDark:'#000', colorLight:'#fff' });
+        }
+
+        // ==================== 事件绑定 ====================
+        document.addEventListener('keydown', e=>{
+            if (e.key==='e') { e.preventDefault(); if(GAME_STATE.phase==='preparation') GAME_STATE.inventoryOpen?confirmSelection():openInventory(); }
+            if (['w','a','s','d'].includes(e.key)) { GAME_STATE.keys[e.key]=true; e.preventDefault(); }
+        });
+        document.addEventListener('keyup', e=>{ if(['w','a','s','d'].includes(e.key)) GAME_STATE.keys[e.key]=false; });
+        canvas.addEventListener('mousedown', e=>{ if(e.button===0 && GAME_STATE.phase==='playing') seekerAttack(); });
+        btnCreate.onclick=createRoom; btnJoin.onclick=joinRoom;
+        window.addEventListener('resize', ()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+
+        // ==================== 游戏循环 ====================
+        const clock = new THREE.Clock();
+        let lastBroadcast = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = Math.min(clock.getDelta(), 0.2);
+            if (GAME_STATE.phase==='preparation') {
+                GAME_STATE.preparationTimer -= dt;
+                hudTimer.textContent = Math.ceil(GAME_STATE.preparationTimer);
+                if (GAME_STATE.preparationTimer<=0 && GAME_STATE.isHost) {
+                    GAME_STATE.phase='playing'; GAME_STATE.gameTimer=GAME_TIME;
+                    if (!GAME_STATE.weaponType && GAME_STATE.role==='seeker') GAME_STATE.weaponType='iron_sword';
+                    if (!GAME_STATE.disguiseBlockType && GAME_STATE.role==='hider') { GAME_STATE.disguiseBlockType='oak_log'; GAME_STATE.isDisguised=true; }
+                    updateMyModel(); broadcastPosition();
+                }
+            } else if (GAME_STATE.phase==='playing') {
+                GAME_STATE.gameTimer -= dt;
+                hudTimer.textContent = Math.ceil(Math.max(0,GAME_STATE.gameTimer));
+                if (GAME_STATE.isHost && GAME_STATE.gameTimer<=0) {
+                    GAME_STATE.hiderWins++; GAME_STATE.phase='round_end';
+                    broadcastToAll({ type:'round_end', winner:'hider', seekerWins:GAME_STATE.seekerWins, hiderWins:GAME_STATE.hiderWins });
+                    setTimeout(()=> GAME_STATE.roundNumber<TOTAL_ROUNDS?startNewRound():endGame(), 3000);
+                }
+            }
+            if (GAME_STATE.attackCooldown>0) GAME_STATE.attackCooldown-=dt;
+            if (GAME_STATE.phase==='preparation'||GAME_STATE.phase==='playing') {
+                const speed = (GAME_STATE.isDisguised&&GAME_STATE.phase==='playing')?HIDER_SPEED:PLAYER_SPEED;
+                const dir = new THREE.Vector3(); camera.getWorldDirection(dir); dir.y=0; dir.normalize();
+                const right = new THREE.Vector3().crossVectors(dir, new THREE.Vector3(0,1,0));
+                const move = new THREE.Vector3();
+                if (GAME_STATE.keys.w) move.add(dir); if (GAME_STATE.keys.s) move.sub(dir);
+                if (GAME_STATE.keys.a) move.sub(right); if (GAME_STATE.keys.d) move.add(right);
+                if (move.length()>0) { move.normalize(); GAME_STATE.myPosition.x+=move.x*speed*dt; GAME_STATE.myPosition.z+=move.z*speed*dt; }
+                GAME_STATE.myPosition.x = Math.max(-28,Math.min(28,GAME_STATE.myPosition.x));
+                GAME_STATE.myPosition.z = Math.max(-28,Math.min(28,GAME_STATE.myPosition.z));
+            }
+            myPlayerGroup.position.copy(GAME_STATE.myPosition);
+            orbitControls.target.lerp(new THREE.Vector3(GAME_STATE.myPosition.x, GAME_STATE.myPosition.y+0.8, GAME_STATE.myPosition.z), 0.1);
+            orbitControls.update();
+            if (performance.now() - lastBroadcast > 100) { broadcastPosition(); lastBroadcast = performance.now(); }
+            updateOtherModels();
+            renderer.render(scene, camera);
+        }
+
+        // 自动加入房间（通过URL参数）
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('room')) {
+            roomInput.value = urlParams.get('room');
+            joinRoom();
+        }
+        updateMyModel();
+        animate();
+    </script>
+</body>
+</html>
